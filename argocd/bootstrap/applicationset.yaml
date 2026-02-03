@@ -1,46 +1,26 @@
+# App of Apps - applies all application.yaml files from apps directories
 apiVersion: argoproj.io/v1alpha1
-kind: ApplicationSet
+kind: Application
 metadata:
-  name: cluster-apps
+  name: apps
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
-  generators:
-    # Infrastructure apps (ingress, certs, secrets)
-    - git:
-        repoURL: https://github.com/tomgeorge/homelab-hetzner.git
-        revision: main
-        directories:
-          - path: argocd/apps/infrastructure/*
-    # Observability apps (monitoring, logging)
-    - git:
-        repoURL: https://github.com/tomgeorge/homelab-hetzner.git
-        revision: main
-        directories:
-          - path: argocd/apps/observability/*
-    # User apps
-    - git:
-        repoURL: https://github.com/tomgeorge/homelab-hetzner.git
-        revision: main
-        directories:
-          - path: argocd/apps/user/*
-  template:
-    metadata:
-      name: '{{path.basename}}'
-      namespace: argocd
-    spec:
-      project: '{{path[2]}}'
-      source:
-        repoURL: https://github.com/tomgeorge/homelab-hetzner.git
-        targetRevision: main
-        path: '{{path}}'
-      destination:
-        server: https://kubernetes.default.svc
-        namespace: '{{path.basename}}'
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=true
+  project: default
+  source:
+    repoURL: https://github.com/tomgeorge/homelab-hetzner.git
+    targetRevision: main
+    path: argocd/apps
+    directory:
+      recurse: true
+      include: 'application.yaml'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

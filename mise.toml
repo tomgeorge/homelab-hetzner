@@ -1,5 +1,7 @@
 [tools]
+argocd = "latest"
 hcloud = "latest"
 helm = "latest"
+krew = "latest"
 kubectl = "latest"
 terraform = "latest"
