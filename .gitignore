@@ -10,7 +10,7 @@ terraform/ssh_key.pem
 terraform/*.tfstate.*
 terraform/*.tfplan
 terraform/tfplan
-terraform/.terraform.lock.hcl
+# Note: .terraform.lock.hcl should be committed for reproducibility
 
 # Claude
 .claude/
