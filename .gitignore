@@ -1,0 +1,25 @@
+# Secrets
+tailscale-operator-oauth
+terraform/terraform.tfvars
+terraform/kubeconfig.yaml
+terraform/ssh_key.pem
+
+# Terraform
+**/.terraform/
+*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/tfplan
+terraform/.terraform.lock.hcl
+
+# Claude
+.claude/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store

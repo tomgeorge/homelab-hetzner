@@ -1,0 +1,76 @@
+# Hetzner Cloud API Token
+# Get your token from: https://console.hetzner.cloud/projects
+hcloud_token = "YOUR_HETZNER_CLOUD_TOKEN"
+
+# Cluster Configuration
+cluster_name       = "homelab"
+kubernetes_version = "v1.29.0+k3s1"  # Check latest: https://github.com/k3s-io/k3s/releases
+
+# Location Configuration
+# Available: fsn1 (Falkenstein), nbg1 (Nuremberg), hel1 (Helsinki), ash (Ashburn)
+location     = "fsn1"  # Falkenstein is usually cheapest
+network_zone = "eu-central"
+
+# Server Configuration - Choose based on your budget
+# Budget Setup (~$39/month)
+# control_plane_count = 1
+# control_plane_type  = "cpx21"  # 3 vCPU, 4GB RAM
+# worker_node_count   = 3
+# worker_node_type    = "cpx21"  # 3 vCPU, 4GB RAM
+
+# Recommended Setup (~$70/month)
+control_plane_count = 1
+control_plane_type  = "cpx31"  # 4 vCPU, 8GB RAM
+worker_node_count   = 3
+worker_node_type    = "cpx31"  # 4 vCPU, 8GB RAM
+
+# Performance Setup (~$120/month)
+# control_plane_count = 1
+# control_plane_type  = "cpx31"  # 4 vCPU, 8GB RAM
+# worker_node_count   = 3
+# worker_node_type    = "cpx41"  # 8 vCPU, 16GB RAM
+
+# High Availability Setup (3 control planes)
+# control_plane_count = 3
+# control_plane_type  = "cpx31"
+# worker_node_count   = 3
+# worker_node_type    = "cpx31"
+
+# Network Configuration (usually no need to change)
+network_cidr = "10.0.0.0/16"
+subnet_cidr  = "10.0.1.0/24"
+
+# Storage Configuration
+enable_persistent_volumes = true
+volume_size              = 50  # GB per volume
+
+# Load Balancer Configuration
+enable_load_balancer = true
+load_balancer_type   = "lb11"  # lb11 (5 targets), lb21 (25 targets), lb31 (75 targets)
+
+# ArgoCD Configuration
+install_argocd   = true
+argocd_namespace = "argocd"
+
+# SSH Configuration (leave empty to auto-generate)
+ssh_public_key_path  = ""  # Path to existing public key, e.g., "~/.ssh/id_ed25519.pub"
+ssh_private_key_path = ""  # Path to existing private key, e.g., "~/.ssh/id_ed25519"
+
+# Firewall Configuration
+enable_firewall = true
+
+# Security: Restrict access (recommended for production)
+# Get your public IP: curl ifconfig.me
+# allowed_ssh_ips = ["YOUR_PUBLIC_IP/32"]  # Restrict SSH access
+# allowed_api_ips = ["YOUR_PUBLIC_IP/32"]  # Restrict Kubernetes API access
+
+# Or leave empty to allow from anywhere (less secure)
+allowed_ssh_ips = []
+allowed_api_ips = []
+
+# Tags (optional)
+tags = {
+  managed_by  = "terraform"
+  project     = "homelab"
+  environment = "development"
+}

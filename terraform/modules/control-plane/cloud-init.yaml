@@ -1,0 +1,73 @@
+#cloud-config
+
+# Update and install required packages
+package_update: true
+package_upgrade: true
+packages:
+  - curl
+  - wget
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - apt-transport-https
+  - software-properties-common
+  - open-iscsi  # Required for CSI
+  - nfs-common  # Useful for NFS storage
+
+# Install K3s
+runcmd:
+  # Wait for network to be fully ready
+  - sleep 10
+
+  # Set hostname
+  - hostnamectl set-hostname ${hostname}
+
+  # Get public IP from Hetzner metadata service and detect private network interface
+  - |
+    PUBLIC_IP=$(curl -s http://169.254.169.254/hetzner/v1/metadata/public-ipv4)
+    PRIVATE_IFACE=$(ip -o addr show | grep "${private_ip}" | awk '{print $2}')
+    mkdir -p /etc/rancher/k3s
+    cat > /etc/rancher/k3s/config.yaml <<EOF
+    cluster-init: ${cluster_init}
+    server: ${server_url}
+    token: ${k3s_token}
+    tls-san:
+      - $PUBLIC_IP
+      - ${private_ip}
+    node-ip: ${private_ip}
+    flannel-iface: $PRIVATE_IFACE
+    disable-cloud-controller: true
+    disable:
+      - servicelb
+      - traefik
+    kubelet-arg:
+      - "cloud-provider=external"
+    EOF
+
+  # Install K3s
+  - |
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" sh -
+
+  # Wait for K3s to be ready
+  - |
+    until kubectl get nodes 2>/dev/null; do
+      echo "Waiting for K3s to start..."
+      sleep 5
+    done
+
+  # Label the node
+  - kubectl label node ${hostname} hetzner-node-group=control-plane --overwrite
+
+# Configure automatic updates (optional)
+apt:
+  sources:
+    kubernetes:
+      source: "deb https://apt.kubernetes.io/ kubernetes-xenial main"
+      keyid: 59FE0256827269DC81578F928B57C5C2836F4BEB
+
+# Optimize system settings for Kubernetes
+bootcmd:
+  - echo "net.bridge.bridge-nf-call-iptables=1" >> /etc/sysctl.conf
+  - echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+  - echo "net.bridge.bridge-nf-call-ip6tables=1" >> /etc/sysctl.conf
+  - sysctl -p

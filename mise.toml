@@ -1,0 +1,5 @@
+[tools]
+hcloud = "latest"
+helm = "latest"
+kubectl = "latest"
+terraform = "latest"
