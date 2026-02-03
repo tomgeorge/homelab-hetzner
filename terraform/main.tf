@@ -145,160 +145,137 @@ resource "null_resource" "wait_for_cluster" {
   }
 }
 
-# Create Hetzner Cloud secret for HCCM and CSI
-resource "null_resource" "create_hcloud_secret" {
-  depends_on = [null_resource.wait_for_cluster]
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      SSH_CMD="ssh -i ${var.ssh_public_key_path != "" ? var.ssh_private_key_path : "${path.module}/ssh_key.pem"} -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@${module.control_plane.control_plane_ip}"
-
-      # Create secret for Hetzner Cloud token and network (used by both HCCM and CSI)
-      $SSH_CMD "kubectl -n kube-system create secret generic hcloud \
-        --from-literal=token='${var.hcloud_token}' \
-        --from-literal=network='${module.vpc.network_id}' \
-        --dry-run=client -o yaml | kubectl apply -f -"
-
-      echo "Hetzner Cloud secret created successfully"
-    EOT
+# Create Hetzner Cloud secret for HCCM and CSI (using kubernetes provider)
+resource "kubernetes_secret" "hcloud" {
+  metadata {
+    name      = "hcloud"
+    namespace = "kube-system"
   }
+
+  data = {
+    token   = var.hcloud_token
+    network = tostring(module.vpc.network_id)
+  }
+
+  depends_on = [null_resource.wait_for_cluster]
 }
 
-# Install Hetzner Cloud Controller Manager
-resource "null_resource" "install_hccm" {
+# Install Hetzner Cloud Controller Manager (using helm provider)
+resource "helm_release" "hccm" {
   count = var.enable_load_balancer || var.enable_persistent_volumes ? 1 : 0
 
-  depends_on = [null_resource.create_hcloud_secret]
+  name       = "hcloud-cloud-controller-manager"
+  repository = "https://charts.hetzner.cloud"
+  chart      = "hcloud-cloud-controller-manager"
+  version    = "1.19.0"
+  namespace  = "kube-system"
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      SSH_CMD="ssh -i ${var.ssh_public_key_path != "" ? var.ssh_private_key_path : "${path.module}/ssh_key.pem"} -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@${module.control_plane.control_plane_ip}"
-
-      # Apply HCCM with network support
-      $SSH_CMD "kubectl apply -f https://github.com/hetznercloud/hcloud-cloud-controller-manager/releases/latest/download/ccm-networks.yaml"
-
-      echo "Hetzner Cloud Controller Manager installed successfully"
-    EOT
+  set {
+    name  = "networking.enabled"
+    value = "true"
   }
+
+  set {
+    name  = "networking.clusterCIDR"
+    value = "10.42.0.0/16"
+  }
+
+  depends_on = [kubernetes_secret.hcloud]
 }
 
-# Install Hetzner CSI Driver
-resource "null_resource" "install_csi" {
+# Install Hetzner CSI Driver (using helm provider)
+resource "helm_release" "hcloud_csi" {
   count = var.enable_persistent_volumes ? 1 : 0
 
-  depends_on = [null_resource.create_hcloud_secret]
+  name       = "hcloud-csi"
+  repository = "https://charts.hetzner.cloud"
+  chart      = "hcloud-csi"
+  version    = "2.6.0"
+  namespace  = "kube-system"
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      SSH_CMD="ssh -i ${var.ssh_public_key_path != "" ? var.ssh_private_key_path : "${path.module}/ssh_key.pem"} -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@${module.control_plane.control_plane_ip}"
-
-      # Install CSI driver
-      $SSH_CMD "kubectl apply -f https://raw.githubusercontent.com/hetznercloud/csi-driver/main/deploy/kubernetes/hcloud-csi.yaml"
-
-      # Wait for CSI driver to be ready
-      sleep 10
-
-      # Create default storage class
-      $SSH_CMD 'cat <<EOF | kubectl apply -f -
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: hcloud-volumes
-  annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
-provisioner: csi.hetzner.cloud
-volumeBindingMode: WaitForFirstConsumer
-allowVolumeExpansion: true
-parameters:
-  csiDriver: csi.hetzner.cloud
-EOF'
-
-      echo "Hetzner CSI Driver and default storage class installed successfully"
-    EOT
-  }
+  depends_on = [kubernetes_secret.hcloud]
 }
 
-# Install ArgoCD
-resource "null_resource" "install_argocd" {
+# Create default storage class
+resource "kubernetes_storage_class" "hcloud_volumes" {
+  count = var.enable_persistent_volumes ? 1 : 0
+
+  metadata {
+    name = "hcloud-volumes"
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "true"
+    }
+  }
+
+  storage_provisioner    = "csi.hetzner.cloud"
+  volume_binding_mode    = "WaitForFirstConsumer"
+  allow_volume_expansion = true
+
+  depends_on = [helm_release.hcloud_csi]
+}
+
+# Install ArgoCD (using helm provider with Tailscale annotations)
+resource "helm_release" "argocd" {
   count = var.install_argocd ? 1 : 0
+
+  name             = "argocd"
+  repository       = "https://argoproj.github.io/argo-helm"
+  chart            = "argo-cd"
+  version          = "5.55.0"
+  namespace        = var.argocd_namespace
+  create_namespace = true
+
+  # Server service type - ClusterIP for Tailscale, LoadBalancer otherwise
+  set {
+    name  = "server.service.type"
+    value = var.install_tailscale ? "ClusterIP" : "LoadBalancer"
+  }
+
+  # Tailscale annotations (when enabled)
+  dynamic "set" {
+    for_each = var.install_tailscale ? [1] : []
+    content {
+      name  = "server.service.annotations.tailscale\\.com/expose"
+      value = "true"
+    }
+  }
+
+  dynamic "set" {
+    for_each = var.install_tailscale ? [1] : []
+    content {
+      name  = "server.service.annotations.tailscale\\.com/hostname"
+      value = "argocd"
+    }
+  }
 
   depends_on = [
     null_resource.wait_for_cluster,
-    null_resource.install_hccm,
-    null_resource.install_csi
+    helm_release.hccm,
+    helm_release.hcloud_csi
   ]
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      SSH_CMD="ssh -i ${var.ssh_public_key_path != "" ? var.ssh_private_key_path : "${path.module}/ssh_key.pem"} -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@${module.control_plane.control_plane_ip}"
-
-      echo "Installing ArgoCD in namespace ${var.argocd_namespace}..."
-
-      # Create namespace and install ArgoCD
-      $SSH_CMD "kubectl create namespace ${var.argocd_namespace} --dry-run=client -o yaml | kubectl apply -f -"
-      $SSH_CMD "kubectl apply -n ${var.argocd_namespace} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
-
-      # Wait for ArgoCD to be ready
-      echo "Waiting for ArgoCD pods to be ready..."
-      $SSH_CMD "kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-server -n ${var.argocd_namespace} --timeout=300s"
-
-      # Patch ArgoCD server to use LoadBalancer
-      $SSH_CMD "kubectl patch svc argocd-server -n ${var.argocd_namespace} -p '{\"spec\": {\"type\": \"LoadBalancer\"}}'"
-
-      echo "ArgoCD installation complete!"
-    EOT
-  }
 }
 
-# Install Tailscale Operator (runs locally using generated kubeconfig)
-resource "null_resource" "install_tailscale" {
+# Install Tailscale Operator (using helm provider)
+resource "helm_release" "tailscale_operator" {
   count = var.install_tailscale ? 1 : 0
 
-  depends_on = [null_resource.wait_for_cluster, local_sensitive_file.kubeconfig]
+  name             = "tailscale-operator"
+  repository       = "https://pkgs.tailscale.com/helmcharts"
+  chart            = "tailscale-operator"
+  version          = "1.58.2"
+  namespace        = "tailscale"
+  create_namespace = true
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      export KUBECONFIG="${path.module}/kubeconfig.yaml"
-
-      echo "Installing Tailscale operator..."
-
-      # Add Tailscale Helm repo
-      helm repo add tailscale https://pkgs.tailscale.com/helmcharts 2>/dev/null || true
-      helm repo update
-
-      # Install Tailscale operator
-      helm upgrade --install tailscale-operator tailscale/tailscale-operator \
-        --namespace=tailscale --create-namespace \
-        --set-string oauth.clientId='${var.tailscale_oauth_client_id}' \
-        --set-string oauth.clientSecret='${var.tailscale_oauth_client_secret}' \
-        --wait
-
-      echo "Tailscale operator installed successfully"
-    EOT
+  set_sensitive {
+    name  = "oauth.clientId"
+    value = var.tailscale_oauth_client_id
   }
-}
 
-# Expose ArgoCD via Tailscale (runs locally using generated kubeconfig)
-resource "null_resource" "expose_argocd_tailscale" {
-  count = var.install_tailscale && var.install_argocd ? 1 : 0
-
-  depends_on = [
-    null_resource.install_tailscale,
-    null_resource.install_argocd
-  ]
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      export KUBECONFIG="${path.module}/kubeconfig.yaml"
-
-      # Annotate ArgoCD service to expose via Tailscale
-      kubectl annotate svc argocd-server -n argocd \
-        tailscale.com/expose='true' \
-        tailscale.com/hostname='argocd' \
-        --overwrite
-
-      echo "ArgoCD exposed to tailnet as 'argocd'"
-    EOT
+  set_sensitive {
+    name  = "oauth.clientSecret"
+    value = var.tailscale_oauth_client_secret
   }
+
+  depends_on = [null_resource.wait_for_cluster]
 }
 
