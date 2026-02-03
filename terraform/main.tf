@@ -263,3 +263,41 @@ resource "helm_release" "tailscale_operator" {
   depends_on = [null_resource.wait_for_cluster]
 }
 
+# Deploy ArgoCD Root Application for GitOps bootstrap
+resource "kubernetes_manifest" "argocd_root_app" {
+  count = var.install_argocd ? 1 : 0
+
+  manifest = {
+    apiVersion = "argoproj.io/v1alpha1"
+    kind       = "Application"
+    metadata = {
+      name       = "root"
+      namespace  = var.argocd_namespace
+      finalizers = ["resources-finalizer.argocd.argoproj.io"]
+    }
+    spec = {
+      project = "default"
+      source = {
+        repoURL        = "https://github.com/tomgeorge/homelab-hetzner.git"
+        targetRevision = "main"
+        path           = "argocd/bootstrap"
+        directory = {
+          recurse = true
+        }
+      }
+      destination = {
+        server    = "https://kubernetes.default.svc"
+        namespace = var.argocd_namespace
+      }
+      syncPolicy = {
+        automated = {
+          prune    = true
+          selfHeal = true
+        }
+        syncOptions = ["CreateNamespace=true"]
+      }
+    }
+  }
+
+  depends_on = [helm_release.argocd]
+}

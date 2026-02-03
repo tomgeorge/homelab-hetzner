@@ -1,0 +1,65 @@
+# Ingress-nginx Configuration
+# https://kubernetes.github.io/ingress-nginx/
+
+controller:
+  # Run 2 replicas for high availability
+  replicaCount: 2
+
+  # Hetzner Load Balancer configuration
+  service:
+    type: LoadBalancer
+    annotations:
+      # Hetzner Cloud Controller Manager annotations
+      load-balancer.hetzner.cloud/name: "homelab-ingress"
+      load-balancer.hetzner.cloud/location: "hel1"
+      load-balancer.hetzner.cloud/use-private-ip: "true"
+      load-balancer.hetzner.cloud/uses-proxyprotocol: "true"
+
+  # Enable proxy protocol for real client IPs
+  config:
+    use-proxy-protocol: "true"
+    proxy-real-ip-cidr: "10.0.0.0/8"
+    # Security headers
+    hsts: "true"
+    hsts-include-subdomains: "true"
+    hsts-max-age: "31536000"
+
+  # Enable Prometheus metrics
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+
+  # Resource limits suitable for homelab
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Pod disruption budget for HA
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Affinity to spread across nodes
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - ingress-nginx
+            topologyKey: kubernetes.io/hostname
+
+# Default backend for 404s
+defaultBackend:
+  enabled: false

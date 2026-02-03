@@ -1,0 +1,193 @@
+# kube-prometheus-stack Configuration
+# https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack
+
+# Global settings
+fullnameOverride: prometheus
+
+# Prometheus configuration
+prometheus:
+  prometheusSpec:
+    # Retain metrics for 15 days
+    retention: 15d
+
+    # Persistent storage using Hetzner CSI
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: hcloud-volumes
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+    # Resource limits suitable for homelab
+    resources:
+      requests:
+        memory: 1Gi
+        cpu: 500m
+      limits:
+        memory: 2Gi
+        cpu: 1000m
+
+    # Scrape interval
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+
+# Grafana configuration
+grafana:
+  enabled: true
+
+  # Admin credentials - change after first login!
+  adminUser: admin
+  # Default password - CHANGE THIS after setup
+  adminPassword: homelab-admin
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    storageClassName: hcloud-volumes
+    size: 5Gi
+
+  # Grafana is internal-only (access via Tailscale)
+  # No public ingress - use port-forward or Tailscale
+  service:
+    type: ClusterIP
+    annotations:
+      tailscale.com/expose: "true"
+      tailscale.com/hostname: "grafana"
+
+  # Grafana.ini configuration
+  grafana.ini:
+    server:
+      root_url: https://grafana.tgdev.xyz
+    auth.anonymous:
+      enabled: false
+
+  # Pre-installed dashboards
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'default'
+          orgId: 1
+          folder: ''
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
+  # Community dashboards from Grafana.com
+  dashboards:
+    default:
+      # Kubernetes cluster overview
+      kubernetes-cluster:
+        gnetId: 7249
+        revision: 1
+        datasource: Prometheus
+      # Node exporter full
+      node-exporter:
+        gnetId: 1860
+        revision: 33
+        datasource: Prometheus
+      # NGINX Ingress Controller
+      nginx-ingress:
+        gnetId: 9614
+        revision: 1
+        datasource: Prometheus
+      # ArgoCD dashboard
+      argocd:
+        gnetId: 14584
+        revision: 1
+        datasource: Prometheus
+
+  # Resource limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# AlertManager configuration
+alertmanager:
+  alertmanagerSpec:
+    # Persistent storage
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: hcloud-volumes
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+    # Resource limits
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+# Node exporter for host metrics
+nodeExporter:
+  enabled: true
+
+# Kube-state-metrics for Kubernetes metrics
+kubeStateMetrics:
+  enabled: true
+
+# Prometheus Operator
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Default rules (alerts)
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false  # K3s uses embedded etcd differently
+    configReloaders: true
+    general: true
+    k8s: true
+    kubeApiserverAvailability: true
+    kubeApiserverBurnrate: true
+    kubeApiserverHistogram: true
+    kubeApiserverSlos: true
+    kubeControllerManager: false  # K3s bundled
+    kubelet: true
+    kubeProxy: false  # K3s uses kube-router
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    kubeSchedulerAlerting: false  # K3s bundled
+    kubeSchedulerRecording: false
+    kubeStateMetrics: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true
+
+# Disable scraping of K3s bundled components
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false

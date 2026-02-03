@@ -1,0 +1,46 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  generators:
+    # Infrastructure apps (ingress, certs, secrets)
+    - git:
+        repoURL: https://github.com/tomgeorge/homelab-hetzner.git
+        revision: main
+        directories:
+          - path: argocd/apps/infrastructure/*
+    # Observability apps (monitoring, logging)
+    - git:
+        repoURL: https://github.com/tomgeorge/homelab-hetzner.git
+        revision: main
+        directories:
+          - path: argocd/apps/observability/*
+    # User apps
+    - git:
+        repoURL: https://github.com/tomgeorge/homelab-hetzner.git
+        revision: main
+        directories:
+          - path: argocd/apps/user/*
+  template:
+    metadata:
+      name: '{{path.basename}}'
+      namespace: argocd
+    spec:
+      project: '{{path[2]}}'
+      source:
+        repoURL: https://github.com/tomgeorge/homelab-hetzner.git
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{path.basename}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

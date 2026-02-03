@@ -1,0 +1,38 @@
+# Cert-Manager Configuration
+# https://cert-manager.io/docs/installation/helm/
+
+# Install CRDs with Helm
+installCRDs: true
+
+# Enable Prometheus metrics
+prometheus:
+  enabled: true
+  servicemonitor:
+    enabled: true
+
+# Resource limits suitable for homelab
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+webhook:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+cainjector:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi

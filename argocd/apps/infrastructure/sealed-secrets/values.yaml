@@ -1,0 +1,18 @@
+# Sealed Secrets Controller Configuration
+# https://github.com/bitnami-labs/sealed-secrets
+
+fullnameOverride: sealed-secrets-controller
+
+# Resource limits suitable for homelab
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
+
+# Enable metrics for Prometheus scraping
+metrics:
+  serviceMonitor:
+    enabled: true

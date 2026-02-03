@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: example-app
+  annotations:
+    # Use Let's Encrypt staging for testing (switch to letsencrypt-prod for real certs)
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: example.tgdev.xyz
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: example-app
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - example.tgdev.xyz
+      secretName: example-app-tls

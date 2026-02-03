@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: example-app
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: user-apps
+  source:
+    repoURL: https://github.com/tomgeorge/homelab-hetzner.git
+    targetRevision: main
+    path: argocd/apps/user/example-app
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: example-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
