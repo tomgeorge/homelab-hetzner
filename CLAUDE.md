@@ -7,7 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Always run `terraform plan` before `terraform apply` and wait for user approval
 - Use mise to manage CLI tools (helm, kubectl, terraform) - run `mise use <tool>` to add tools
 - Run Helm and kubectl commands locally using `KUBECONFIG=./kubeconfig.yaml` instead of via SSH
-- Terraform provisioners for Helm/kubectl should use local execution with the generated kubeconfig, not SSH
+- Use `helm_release` and `kubernetes_*` resources instead of `null_resource` with local-exec
+- Pin Helm chart versions explicitly - never use "latest" or unpinned versions
+- Use `set_sensitive` for secrets in helm_release to prevent logging
 
 ## Project Overview
 
@@ -38,7 +40,7 @@ helm list -A
 ssh -i ~/.ssh/id_homelab root@<control_plane_ip> "kubectl get nodes"
 
 # ArgoCD admin password
-ssh -i ~/.ssh/id_homelab root@<control_plane_ip> "kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
 ```
 
 ## Architecture
@@ -73,10 +75,11 @@ Copy `terraform.tfvars.example` to `terraform.tfvars` and set:
 - Security: `allowed_ssh_ips`, `allowed_api_ips` for access restriction
 
 ## Tech Stack
-- Terraform ≥ 1.0 with Hetzner, TLS, Random, Local, Null providers
+- Terraform ≥ 1.0 with Hetzner, TLS, Random, Local, Null, Kubernetes, Helm providers
 - K3s with Flannel CNI (VXLAN port 8472)
-- Hetzner Cloud Controller Manager and CSI Driver
-- ArgoCD for GitOps (apps go in `argocd/apps/`)
+- Hetzner Cloud Controller Manager (Helm v1.19.0) and CSI Driver (Helm v2.6.0)
+- ArgoCD for GitOps (Helm v5.55.0)
+- Tailscale Operator for private network access (Helm v1.58.2)
 
 ## Debugging
 
@@ -103,25 +106,28 @@ kubectl describe node <node> | grep Taints
 After `terraform apply`, verify the cluster is fully operational:
 
 ```bash
-SSH_CMD="ssh -i ~/.ssh/id_homelab -o StrictHostKeyChecking=no root@<control_plane_ip>"
+export KUBECONFIG=./kubeconfig.yaml
 
-# 1. All nodes Ready (1 control plane + 3 workers)
-$SSH_CMD "kubectl get nodes"
+# 1. All Helm releases deployed
+helm list -A
 
-# 2. kube-system pods Running (coredns, hccm, local-path-provisioner, metrics-server)
-$SSH_CMD "kubectl get pods -n kube-system"
+# 2. All nodes Ready (1 control plane + 3 workers)
+kubectl get nodes
 
-# 3. ArgoCD pods Running
-$SSH_CMD "kubectl get pods -n argocd"
+# 3. kube-system pods Running (coredns, hccm, csi, metrics-server)
+kubectl get pods -n kube-system
 
-# 4. No Pending pods (confirms HCCM removed node taints)
-$SSH_CMD "kubectl get pods -A | grep -i pending"
+# 4. ArgoCD pods Running
+kubectl get pods -n argocd
 
-# 5. hcloud secret has both token and network keys
-$SSH_CMD "kubectl get secret hcloud -n kube-system -o jsonpath='{.data}'"
+# 5. Tailscale operator and proxy pods Running
+kubectl get pods -n tailscale
 
-# 6. TLS cert includes public IP (kubeconfig works remotely)
-$SSH_CMD "openssl s_client -connect <control_plane_ip>:6443 2>/dev/null </dev/null | openssl x509 -noout -text | grep -A1 'Subject Alternative Name'"
+# 6. No Pending pods (confirms HCCM removed node taints)
+kubectl get pods -A | grep -i pending
+
+# 7. ArgoCD service has Tailscale annotations
+kubectl get svc argocd-server -n argocd -o jsonpath='{.metadata.annotations}'
 ```
 
 ## Known Issues & Solutions
@@ -132,13 +138,49 @@ $SSH_CMD "openssl s_client -connect <control_plane_ip>:6443 2>/dev/null </dev/nu
 - **Node labels**: Cannot set `node-role.kubernetes.io/*` via kubelet flags - use `kubectl label` after node joins
 
 ### HCCM (Hetzner Cloud Controller Manager)
-- The `ccm-networks.yaml` manifest requires the hcloud secret to have BOTH `token` AND `network` keys
+- Installed via `helm_release` from `https://charts.hetzner.cloud`
+- Requires `kubernetes_secret.hcloud` with both `token` and `network` keys
 - Without the `network` key, HCCM fails with: `couldn't find key network in Secret kube-system/hcloud`
 - Nodes have taint `node.cloudprovider.kubernetes.io/uninitialized: true` until HCCM initializes them - pods stay Pending
+- CSI driver Helm chart creates its own storage class - don't create a duplicate
 
-### Terraform Provisioners
-- Helm/kubectl provisioners should run locally with `KUBECONFIG="${path.module}/kubeconfig.yaml"` (not via SSH)
-- Cloud-init and K3s bootstrap provisioners use SSH since kubeconfig doesn't exist yet
-- `null_resource` needs `triggers` block to re-run when dependencies change (e.g., server ID)
-- Tilde (`~`) in paths may not expand in local-exec - use full paths or `${path.module}`
-- SSH key path must be explicitly passed to modules that need it
+### Terraform Patterns
+
+**Use declarative resources instead of null_resource:**
+```hcl
+# Good: helm_release resource
+resource "helm_release" "argocd" {
+  name       = "argocd"
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argo-cd"
+  version    = "5.55.0"  # Always pin version
+  namespace  = "argocd"
+
+  set_sensitive {  # Protects secrets from logs
+    name  = "configs.secret.key"
+    value = var.secret_value
+  }
+}
+
+# Bad: null_resource with shell commands
+resource "null_resource" "install" {
+  provisioner "local-exec" {
+    command = "helm install ..."  # Avoid this pattern
+  }
+}
+```
+
+**Provider configuration** (`providers.tf`):
+- Kubernetes and Helm providers connect via kubeconfig from control_plane module
+- Uses `yamldecode()` and `base64decode()` to parse kubeconfig
+- Providers depend on cluster being ready before resources are created
+
+**When null_resource is still needed:**
+- `wait_for_cluster` - SSH polling until nodes are Ready (kubeconfig doesn't exist yet)
+- `wait_for_control_plane` - Initial K3s bootstrap check
+- Cloud-init bootstrap operations
+
+**Migration from kubectl-installed resources:**
+- Helm cannot adopt resources not originally installed by Helm
+- Must delete existing resources (namespace, CRDs, ClusterRoles) before Helm can install
+- Use `terraform import` for resources that were already Helm-installed elsewhere

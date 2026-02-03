@@ -196,23 +196,7 @@ resource "helm_release" "hcloud_csi" {
   depends_on = [kubernetes_secret.hcloud]
 }
 
-# Create default storage class
-resource "kubernetes_storage_class" "hcloud_volumes" {
-  count = var.enable_persistent_volumes ? 1 : 0
-
-  metadata {
-    name = "hcloud-volumes"
-    annotations = {
-      "storageclass.kubernetes.io/is-default-class" = "true"
-    }
-  }
-
-  storage_provisioner    = "csi.hetzner.cloud"
-  volume_binding_mode    = "WaitForFirstConsumer"
-  allow_volume_expansion = true
-
-  depends_on = [helm_release.hcloud_csi]
-}
+# Note: hcloud-csi Helm chart creates the storage class automatically
 
 # Install ArgoCD (using helm provider with Tailscale annotations)
 resource "helm_release" "argocd" {
